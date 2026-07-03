@@ -1,29 +1,27 @@
-import { Application, Container, Sprite } from "pixi.js";
+import { Container, Sprite } from "pixi.js";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import type { MapProject, ProjectLocation } from "../types";
 import { parseWallKey, WALL_THICKNESS_RATIO } from "../types";
 import { assetFileUrl, thumbnailPath } from "./projectIO";
 import { loadTexture } from "./textureCache";
+import { getSharedRenderer } from "./sharedRenderer";
 import { wallGeometry } from "./wallGeometry";
 
 function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-async function buildMapApp(
+// Renders offscreen using the map canvas's existing WebGL renderer instead of
+// spinning up a second PixiJS Application (i.e. a second WebGL context) — see
+// sharedRenderer.ts for why that was crashing the visible canvas.
+async function buildMapContainer(
   project: MapProject,
   location: ProjectLocation,
-  outputWidth: number,
-  outputHeight: number,
   scale: number,
-): Promise<{ app: Application; root: Container }> {
-  const app = new Application();
-  await app.init({ width: outputWidth, height: outputHeight, background: "#00000000", backgroundAlpha: 0, antialias: true });
-
+): Promise<Container> {
   const root = new Container();
   root.sortableChildren = true;
   root.scale.set(scale);
-  app.stage.addChild(root);
 
   const floorLayer = new Container();
   floorLayer.zIndex = 0;
@@ -89,13 +87,14 @@ async function buildMapApp(
 
   await Promise.all(cellJobs);
   propsLayer.sortChildren();
-  app.renderer.render(app.stage);
 
-  return { app, root };
+  return root;
 }
 
-async function extractPngBytes(app: Application, root: Container): Promise<Uint8Array> {
-  const dataUrl = app.renderer.extract.base64({ target: root, format: "png" });
+async function extractPngBytes(root: Container): Promise<Uint8Array> {
+  const renderer = getSharedRenderer();
+  if (!renderer) throw new Error("Map renderer is not ready yet");
+  const dataUrl = renderer.extract.base64({ target: root, format: "png" });
   const resolved = dataUrl instanceof Promise ? await dataUrl : dataUrl;
   const base64 = resolved.slice(resolved.indexOf(",") + 1);
   const binary = atob(base64);
@@ -105,13 +104,11 @@ async function extractPngBytes(app: Application, root: Container): Promise<Uint8
 }
 
 export async function renderProjectToPngBytes(project: MapProject, location: ProjectLocation): Promise<Uint8Array> {
-  const width = project.gridWidth * project.tileSize;
-  const height = project.gridHeight * project.tileSize;
-  const { app, root } = await buildMapApp(project, location, width, height, 1);
+  const root = await buildMapContainer(project, location, 1);
   try {
-    return await extractPngBytes(app, root);
+    return await extractPngBytes(root);
   } finally {
-    app.destroy(true, { children: true });
+    root.destroy({ children: true });
   }
 }
 
@@ -124,13 +121,11 @@ export async function renderProjectThumbnailBytes(
   const fullWidth = project.gridWidth * project.tileSize;
   const fullHeight = project.gridHeight * project.tileSize;
   const scale = Math.min(1, maxDim / Math.max(fullWidth, fullHeight, 1));
-  const outputWidth = Math.max(1, Math.round(fullWidth * scale));
-  const outputHeight = Math.max(1, Math.round(fullHeight * scale));
-  const { app, root } = await buildMapApp(project, location, outputWidth, outputHeight, scale);
+  const root = await buildMapContainer(project, location, scale);
   try {
-    return await extractPngBytes(app, root);
+    return await extractPngBytes(root);
   } finally {
-    app.destroy(true, { children: true });
+    root.destroy({ children: true });
   }
 }
 

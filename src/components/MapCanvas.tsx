@@ -3,6 +3,7 @@ import { Application, Container, Graphics, Sprite, type FederatedPointerEvent } 
 import { useEditorStore } from "../store/editorStore";
 import { assetFileUrl } from "../lib/projectIO";
 import { loadTexture } from "../lib/textureCache";
+import { registerSharedRenderer } from "../lib/sharedRenderer";
 import { canonicalizeWallEdge, parseWallKey, wallKey, WALL_THICKNESS_RATIO } from "../types";
 import type { AssetRef, MapProject, ProjectLocation, WallEdge } from "../types";
 import { nearestEdge, wallGeometry } from "../lib/wallGeometry";
@@ -246,6 +247,7 @@ export function MapCanvas() {
           return;
         }
         el.appendChild(app.canvas);
+        registerSharedRenderer(app.renderer);
 
         const world = new Container();
         world.sortableChildren = true;
@@ -609,6 +611,7 @@ export function MapCanvas() {
 
     return () => {
       destroyed = true;
+      registerSharedRenderer(null);
       if (appRef.current) {
         try {
           appRef.current.destroy(true, { children: true });

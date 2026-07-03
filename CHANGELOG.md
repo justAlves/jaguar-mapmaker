@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- App crashing silently when switching between the floor/wall/prop asset tabs in libraries with hundreds of assets — the panel was decoding every full-resolution image in the category at once, which could exhaust memory and take down the whole window with no error dialog.
+- Canvas going blank after saving (`Ctrl+S` or the save button) — generating the project's preview thumbnail spun up a second WebGL context, which could knock out the main canvas's context on systems with fragile GPU compositing.
+
+### Changed
+
+- Asset panel thumbnails are now generated at a small fixed size, cached to disk, and loaded only as they scroll into view, instead of rendering every asset in a category at full resolution up front.
+- Project thumbnail generation (on save and for the recent-projects list) now reuses the map canvas's existing renderer instead of creating a separate one.
+
 ## [0.1.0] - 2026-07-03
 
 Initial release.

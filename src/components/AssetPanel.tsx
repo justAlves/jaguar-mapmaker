@@ -1,12 +1,50 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Folder as FolderIcon, Upload } from "lucide-react";
 import { useEditorStore } from "../store/editorStore";
 import { assetFileUrl, importAssets } from "../lib/projectIO";
+import { thumbnailUrl } from "../lib/thumbnailCache";
 import { AssetFolderMenu } from "./AssetFolderMenu";
 import { IconButton } from "./IconButton";
 import { useT } from "../i18n/useT";
 import type { TranslationKey } from "../i18n/translations";
-import type { AssetCategory } from "../types";
+import type { AssetCategory, AssetRef, ProjectLocation } from "../types";
+
+function AssetThumbImage({ location, asset }: { location: ProjectLocation; asset: AssetRef }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let cancelled = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        observer.disconnect();
+        const fullUrl = assetFileUrl(location, asset);
+        thumbnailUrl(location, asset, fullUrl)
+          .then((url) => {
+            if (!cancelled) setSrc(url);
+          })
+          .catch(() => {
+            if (!cancelled) setSrc(fullUrl);
+          });
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [location, asset]);
+
+  return (
+    <div ref={containerRef} className="asset-thumb-preview">
+      {src && <img src={src} alt={asset.fileName} loading="lazy" />}
+    </div>
+  );
+}
 
 const CATEGORY_LABEL_KEYS: Record<AssetCategory, TranslationKey> = {
   floor: "category.floor",
@@ -145,9 +183,7 @@ export function AssetPanel() {
             onClick={() => handleSelect(asset.id, asset.category)}
             title={asset.fileName}
           >
-            <div className="asset-thumb-preview">
-              <img src={assetFileUrl(location, asset)} alt={asset.fileName} />
-            </div>
+            <AssetThumbImage location={location} asset={asset} />
             <span className="asset-thumb-name">{asset.fileName}</span>
             <button
               type="button"
