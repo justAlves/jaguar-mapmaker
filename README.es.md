@@ -92,4 +92,4 @@ Las contribuciones son bienvenidas — consulta [CONTRIBUTING.md](CONTRIBUTING.m
 
 ## Licencia
 
-MIT — consulta [LICENSE](LICENSE).
+MIT — consulta [LICENSE](LICENSE). Consulta [CHANGELOG.md](CHANGELOG.md) para el historial de versiones.
