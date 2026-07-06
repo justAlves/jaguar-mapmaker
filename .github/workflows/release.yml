@@ -16,11 +16,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS intentionally left out for now (no way to test it locally yet).
           - platform: "ubuntu-22.04"
             args: ""
           - platform: "windows-latest"
             args: ""
+          # Universal binary (arm64 + x86_64 in one bundle) so a single .dmg covers Apple Silicon and Intel Macs.
+          - platform: "macos-latest"
+            args: "--target universal-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -39,6 +41,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
