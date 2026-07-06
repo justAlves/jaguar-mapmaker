@@ -8,6 +8,18 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // Two static entry points sharing this one Vite project: the Tauri app itself (index.html,
+  // what `tauri.conf.json`'s frontendDist points at) and the marketing landing page
+  // (landing.html — not part of the desktop app, deployed separately as a static site).
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        landing: "landing.html",
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

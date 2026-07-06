@@ -1,15 +1,10 @@
-import { appConfigDir } from "@tauri-apps/api/path";
-import { mkdir, readTextFile, writeTextFile, exists, copyFile } from "@tauri-apps/plugin-fs";
 import { nanoid } from "nanoid";
 import type { AssetCategory, AssetRef, ProjectLocation } from "../types";
 import { importAssets, assetFileUrl } from "./projectIO";
+import { storage } from "./storage";
 
 const LIBRARY_DIR_NAME = "asset-library";
 const LIBRARY_FILE_NAME = "library.json";
-
-function join(...parts: string[]): string {
-  return parts.join("/").replace(/\/+/g, "/");
-}
 
 let cachedLocation: ProjectLocation | null = null;
 
@@ -20,21 +15,21 @@ let cachedLocation: ProjectLocation | null = null;
  */
 export async function libraryLocation(): Promise<ProjectLocation> {
   if (cachedLocation) return cachedLocation;
-  const configDir = await appConfigDir();
-  const folderPath = join(configDir, LIBRARY_DIR_NAME);
-  const filePath = join(folderPath, LIBRARY_FILE_NAME);
-  await mkdir(join(folderPath, "assets", "floor"), { recursive: true });
-  await mkdir(join(folderPath, "assets", "wall"), { recursive: true });
-  await mkdir(join(folderPath, "assets", "prop"), { recursive: true });
+  const configDir = await storage.configDir();
+  const folderPath = storage.join(configDir, LIBRARY_DIR_NAME);
+  const filePath = storage.join(folderPath, LIBRARY_FILE_NAME);
+  await storage.mkdir(storage.join(folderPath, "assets", "floor"));
+  await storage.mkdir(storage.join(folderPath, "assets", "wall"));
+  await storage.mkdir(storage.join(folderPath, "assets", "prop"));
   cachedLocation = { folderPath, filePath };
   return cachedLocation;
 }
 
 export async function loadLibraryAssets(): Promise<AssetRef[]> {
   const location = await libraryLocation();
-  if (!(await exists(location.filePath))) return [];
+  if (!(await storage.exists(location.filePath))) return [];
   try {
-    return JSON.parse(await readTextFile(location.filePath)) as AssetRef[];
+    return JSON.parse(await storage.readTextFile(location.filePath)) as AssetRef[];
   } catch {
     return [];
   }
@@ -42,7 +37,7 @@ export async function loadLibraryAssets(): Promise<AssetRef[]> {
 
 async function saveLibraryAssets(assets: AssetRef[]): Promise<void> {
   const location = await libraryLocation();
-  await writeTextFile(location.filePath, JSON.stringify(assets, null, 2));
+  await storage.writeTextFile(location.filePath, JSON.stringify(assets, null, 2));
 }
 
 export async function importToLibrary(category: AssetCategory, folder?: string): Promise<AssetRef[]> {
@@ -86,22 +81,22 @@ export async function addLibraryAssetToProject(
   projectLocation: ProjectLocation,
   asset: AssetRef,
 ): Promise<AssetRef> {
-  const destDir = join(projectLocation.folderPath, "assets", asset.category);
-  await mkdir(destDir, { recursive: true });
-  const sourcePath = join(libLocation.folderPath, "assets", asset.category, asset.relativePath);
+  const destDir = storage.join(projectLocation.folderPath, "assets", asset.category);
+  await storage.mkdir(destDir);
+  const sourcePath = storage.join(libLocation.folderPath, "assets", asset.category, asset.relativePath);
 
   let destName = asset.relativePath;
-  let destPath = join(destDir, destName);
+  let destPath = storage.join(destDir, destName);
   let counter = 1;
-  while (await exists(destPath)) {
+  while (await storage.exists(destPath)) {
     const dotIdx = asset.relativePath.lastIndexOf(".");
     const base = dotIdx >= 0 ? asset.relativePath.slice(0, dotIdx) : asset.relativePath;
     const ext = dotIdx >= 0 ? asset.relativePath.slice(dotIdx) : "";
     destName = `${base}_${counter}${ext}`;
-    destPath = join(destDir, destName);
+    destPath = storage.join(destDir, destName);
     counter++;
   }
-  await copyFile(sourcePath, destPath);
+  await storage.copyFile(sourcePath, destPath);
 
   return {
     id: nanoid(),

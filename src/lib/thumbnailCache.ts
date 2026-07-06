@@ -1,6 +1,5 @@
-import { mkdir, writeFile, exists } from "@tauri-apps/plugin-fs";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { AssetRef, ProjectLocation } from "../types";
+import { storage } from "./storage";
 
 const THUMB_MAX_SIZE = 160;
 // Deliberately not dot-prefixed: Tauri's fs scope matcher requires a literal leading
@@ -8,16 +7,12 @@ const THUMB_MAX_SIZE = 160;
 const THUMB_DIR_NAME = "thumbs";
 const MAX_CONCURRENT_GENERATIONS = 3;
 
-function join(...parts: string[]): string {
-  return parts.join("/").replace(/\/+/g, "/");
-}
-
 function thumbDir(location: ProjectLocation, asset: AssetRef): string {
-  return join(location.folderPath, "assets", asset.category, THUMB_DIR_NAME);
+  return storage.join(location.folderPath, "assets", asset.category, THUMB_DIR_NAME);
 }
 
 function thumbPath(location: ProjectLocation, asset: AssetRef): string {
-  return join(thumbDir(location, asset), asset.relativePath);
+  return storage.join(thumbDir(location, asset), asset.relativePath);
 }
 
 const urlCache = new Map<string, Promise<string>>();
@@ -62,8 +57,8 @@ async function generateThumbnail(sourceUrl: string, destPath: string, destDir: s
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("failed to encode thumbnail");
 
-  await mkdir(destDir, { recursive: true });
-  await writeFile(destPath, new Uint8Array(await blob.arrayBuffer()));
+  await storage.mkdir(destDir);
+  await storage.writeBinaryFile(destPath, new Uint8Array(await blob.arrayBuffer()));
 }
 
 /**
@@ -77,9 +72,9 @@ export function thumbnailUrl(location: ProjectLocation, asset: AssetRef, fullRes
   if (cached) return cached;
 
   const promise = withConcurrencyLimit(async () => {
-    if (await exists(dest)) return convertFileSrc(dest);
+    if (await storage.exists(dest)) return storage.fileUrl(dest);
     await generateThumbnail(fullResUrl, dest, thumbDir(location, asset));
-    return convertFileSrc(dest);
+    return storage.fileUrl(dest);
   }).catch((err) => {
     urlCache.delete(dest);
     throw err;

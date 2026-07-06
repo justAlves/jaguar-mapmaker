@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-06T22:15:00.000Z",
+  "title": "Design System: Jaguar",
+  "extensions": {
+    "colorMeta": {
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "oklch(16.7% 0.012 75)", "tonalRamp": ["#0d0b08", "#14110d", "#1c1811", "#221d15", "#3a3226", "#9d9179", "#b7ac93", "#ede3cc"] },
+      "ink-2": { "role": "neutral", "displayName": "Ink Two", "canonical": "oklch(19.8% 0.014 70)" },
+      "ink-3": { "role": "neutral", "displayName": "Ink Three", "canonical": "oklch(22.4% 0.016 65)" },
+      "line": { "role": "neutral", "displayName": "Line", "canonical": "oklch(29% 0.03 70)" },
+      "line-soft": { "role": "neutral", "displayName": "Line Soft", "canonical": "oklch(21% 0.02 70)" },
+      "parchment": { "role": "neutral", "displayName": "Parchment Text", "canonical": "oklch(91% 0.03 85)" },
+      "text-soft": { "role": "neutral", "displayName": "Soft Text", "canonical": "oklch(75% 0.03 80)" },
+      "text-faint": { "role": "neutral", "displayName": "Faint Text", "canonical": "oklch(66% 0.035 80)" },
+      "ember": { "role": "primary", "displayName": "Ember Amber", "canonical": "oklch(75% 0.14 65)" },
+      "ember-hover": { "role": "primary", "displayName": "Ember Amber (Hover, currently unused)", "canonical": "oklch(80% 0.13 65)" },
+      "moss": { "role": "secondary", "displayName": "Muted Moss", "canonical": "oklch(60% 0.06 145)" },
+      "rust": { "role": "tertiary", "displayName": "Reserved Rust", "canonical": "oklch(60% 0.1 35)" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Archivo 900, uppercase)", "purpose": "Hero h1 only." },
+      "title": { "displayName": "Title (Archivo 800, uppercase)", "purpose": "Section h2s, capped at 22ch." },
+      "body": { "displayName": "Body (Archivo 400-500, sentence case)", "purpose": "Paragraph copy, 40-52ch max width." },
+      "label": { "displayName": "Label (Archivo 700, uppercase)", "purpose": "Nav links, tagline, captions, roadmap group labels and tags, footer — short functional text only." },
+      "code": { "displayName": "Code (system monospace)", "purpose": "The ledger card's literal file-tree snippet only." }
+    },
+    "shadows": [
+      { "name": "hard-offset-ember", "value": "7px 7px 0 0 #e2a33b", "purpose": "Hero screenshot frame. Zero blur, solid color, no rotation." },
+      { "name": "hard-offset-line", "value": "7px 7px 0 0 #3a3226", "purpose": "Gallery shots and the ledger card." },
+      { "name": "hard-offset-ink", "value": "7px 7px 0 0 #14110d", "purpose": "Primary buttons (ember fill, ink offset)." },
+      { "name": "hard-offset-parchment", "value": "7px 7px 0 0 #ede3cc", "purpose": "Inverse button on the ember closing section." }
+    ],
+    "motion": [
+      { "name": "press-state", "value": "translate(7px, 7px), shadow -> 0 0 0 0, 0.12s ease", "purpose": "Button hover/active: element translates into its own hard-offset shadow, which collapses to zero — a literal press motion. The page's one recurring interactive signature." }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "860px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ember-filled CTA with a hard ink offset shadow that collapses on press. Used in the hero and as the small nav-cta (shadow suppressed at nav scale).",
+      "html": "<a class=\"ds-btn-primary\" href=\"#\">Baixar Jaguar</a>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; padding: 0.85em 1.7em; background: #e2a33b; color: #14110d; font-weight: 800; text-transform: uppercase; letter-spacing: 0.01em; font-size: 0.92rem; border: 2px solid #14110d; box-shadow: 7px 7px 0 0 #14110d; transition: transform 0.12s ease, box-shadow 0.12s ease; } .ds-btn-primary:hover { transform: translate(7px, 7px); box-shadow: 0 0 0 0 #14110d; } .ds-btn-primary:focus-visible { outline: 3px solid #e2a33b; outline-offset: 3px; }"
+    },
+    {
+      "name": "Inverse Button",
+      "kind": "button",
+      "refersTo": "button-inverse",
+      "description": "Ink-filled button with parchment text/border/offset — used only on the full-ember closing section, where the primary button would disappear into the background.",
+      "html": "<a class=\"ds-btn-inverse\" href=\"#\">Baixar Jaguar</a>",
+      "css": ".ds-btn-inverse { display: inline-flex; align-items: center; justify-content: center; padding: 0.85em 1.7em; background: #14110d; color: #ede3cc; font-weight: 800; text-transform: uppercase; font-size: 0.92rem; border: 2px solid #ede3cc; box-shadow: 7px 7px 0 0 #ede3cc; transition: transform 0.12s ease, box-shadow 0.12s ease; } .ds-btn-inverse:hover { transform: translate(7px, 7px); box-shadow: 0 0 0 0 #ede3cc; }"
+    },
+    {
+      "name": "Inline Link",
+      "kind": "custom",
+      "refersTo": "link-inline",
+      "description": "Underlined secondary link, sentence case (never uppercase — reads as prose, not a label).",
+      "html": "<a class=\"ds-link\" href=\"#\">Ver código-fonte</a>",
+      "css": ".ds-link { font-size: 0.95rem; color: #b7ac93; border-bottom: 2px solid #3a3226; padding: 6px 0; text-decoration: none; } .ds-link:hover, .ds-link:focus-visible { color: #ede3cc; border-bottom-color: #e2a33b; }"
+    },
+    {
+      "name": "Image Frame",
+      "kind": "card",
+      "refersTo": "image-frame",
+      "description": "Zero-radius bordered frame with a hard offset shadow (no blur, no rotation) around hero and gallery screenshots.",
+      "html": "<figure class=\"ds-shot\"><img src=\"\" alt=\"\" /><figcaption>o editor</figcaption></figure>",
+      "css": ".ds-shot { margin: 0; border: 2px solid #3a3226; background: #221d15; padding: 10px; box-shadow: 7px 7px 0 0 #3a3226; } .ds-shot img { display: block; width: 100%; height: auto; } .ds-shot figcaption { font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.72rem; color: #9d9179; padding: 12px 6px 4px; text-align: center; }"
+    },
+    {
+      "name": "Legend Row",
+      "kind": "custom",
+      "refersTo": "legend-row",
+      "description": "Icon + heading + description feature row; filled square icon block, zero radius, 2px hairline separators — the page's non-card feature-list pattern.",
+      "html": "<div class=\"ds-legend-row\"><div class=\"ds-legend-icon\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"><circle cx=\"12\" cy=\"8\" r=\"3.1\"/><path d=\"M7 20c0-3.5 2.4-6.2 5-6.2s5 2.7 5 6.2\"/></svg></div><div class=\"ds-legend-text\"><h3>Props you can pose</h3><p>Corner, edge, and rotation handles right on the canvas.</p></div></div>",
+      "css": ".ds-legend-row { display: grid; grid-template-columns: 46px 1fr; gap: 18px; padding: 26px 0; border-top: 2px solid #2a251c; } .ds-legend-icon { width: 44px; height: 44px; border: 2px solid #3a3226; background: #221d15; display: flex; align-items: center; justify-content: center; color: #e2a33b; flex-shrink: 0; } .ds-legend-text h3 { font-family: Archivo, sans-serif; font-weight: 700; font-size: 1.05rem; margin: 0 0 6px; color: #ede3cc; } .ds-legend-text p { color: #b7ac93; font-size: 0.92rem; margin: 0; max-width: 40ch; }"
+    },
+    {
+      "name": "Roadmap Tag",
+      "kind": "chip",
+      "refersTo": "roadmap-tag",
+      "description": "Zero-radius rectangular status chip — active (solid ember fill) vs planned (moss text, no fill), per-item, not a single hardcoded label.",
+      "html": "<span class=\"ds-tag ds-tag--active\">em progresso</span> <span class=\"ds-tag ds-tag--planned\">no radar</span>",
+      "css": ".ds-tag { font-weight: 700; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; border: 2px solid #3a3226; padding: 0.3em 0.7em; width: fit-content; white-space: nowrap; } .ds-tag--active { color: #14110d; background: #e2a33b; border-color: #14110d; } .ds-tag--planned { color: #6d8f76; }"
+    },
+    {
+      "name": "Highlight Block",
+      "kind": "custom",
+      "refersTo": "highlight-block",
+      "description": "Solid ember background directly behind a short inline text span — full-block emphasis without gradient-clip text or italics. One deliberate use per view (currently the hero headline).",
+      "html": "<span class=\"ds-hl\">a luz alcança</span>",
+      "css": ".ds-hl { background: #e2a33b; color: #14110d; padding: 0 0.15em; box-decoration-break: clone; -webkit-box-decoration-break: clone; }"
+    },
+    {
+      "name": "Mobile Nav Menu",
+      "kind": "nav",
+      "refersTo": "nav-menu",
+      "description": "Full-screen dark menu opened by the hamburger toggle under 860px.",
+      "html": "<div class=\"ds-nav-menu\"><nav><a href=\"#\">Editor</a><a href=\"#\">Mesa</a></nav><a class=\"ds-btn-primary\" href=\"#\">Baixar Jaguar</a></div>",
+      "css": ".ds-nav-menu { position: fixed; inset: 0; background: #14110d; display: flex; flex-direction: column; padding: 20px 28px 40px; } .ds-nav-menu nav { display: flex; flex-direction: column; gap: 4px; margin-bottom: 32px; } .ds-nav-menu nav a { font-family: Archivo, sans-serif; font-weight: 800; text-transform: uppercase; font-size: 1.3rem; color: #ede3cc; text-decoration: none; padding: 14px 0; border-bottom: 2px solid #2a251c; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Bare Metal",
+    "overview": "Jaguar's landing page runs close to the hardware: one heavy sans family, hard edges, solid color blocks, thick rules, flat offset shadows with zero blur. This is the second real pass at the system: the first fixed individual components (removed a tracked-uppercase eyebrow, removed rotation on screenshots) but kept the underlying recipe — italic serif display + mono labels + hairline dividers — which is itself the most saturated brand-surface aesthetic of 2026. Patching symptoms inside a saturated recipe doesn't escape it. This pass replaces the recipe entirely: a single grotesque sans (Archivo) carrying the whole page through weight contrast alone, zero border-radius anywhere, 2px rules instead of 1px hairlines, and hard non-blurred offset shadows as the one recurring signature device. The ink/ember/moss/rust palette is kept as real brand equity, but its deployment shifts from Restrained (ember as a rare accent) to Committed (ember covers full solid sections when the moment earns it: the closing CTA, the hero highlight block). The previous torch-cursor hero mechanic was removed by deliberate choice, not preserved for its own sake — it belonged to the softer atmospheric system this pass replaces.",
+    "keyCharacteristics": [
+      "One family (Archivo) for everything, carried by weight (700-900 display/labels, 400-500 body) instead of a display+body pairing.",
+      "Zero border-radius anywhere — every edge is a hard corner.",
+      "Hard offset shadows (Npx Npx 0 0 color, zero blur) as the one recurring signature device on framed images and buttons, with a press-on-hover motion.",
+      "2px rules replace 1px hairlines throughout.",
+      "Ember shifts from rare accent to occasional full-field commitment (closing section, hero highlight block).",
+      "Real product screenshots remain the primary persuasive device."
+    ],
+    "rules": [
+      { "name": "The Committed Ember Rule", "body": "Ember is allowed to be the dominant color of a whole section (the closing field, a text-highlight block) — a deliberate strategy shift from 'rare accent,' not scope creep. It still never shares a section with a second saturated hue.", "section": "colors" },
+      { "name": "The One-Family Rule", "body": "Every text role on the page is Archivo. Contrast comes from weight and case, never a second typeface. The only exception is the system monospace stack, reserved for literally-code/file-path content.", "section": "typography" },
+      { "name": "The Hard-Offset-Only Rule", "body": "Any shadow on this page is a flat, zero-blur, solid-color offset block — never a soft blurred glow. If a shadow has blur radius, it's a regression to the previous system.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do carry the whole page on one family (Archivo) through weight and case contrast.",
+      "Do keep every corner hard (zero radius).",
+      "Do use the hard-offset-shadow-plus-press-on-hover motif as the one recurring signature.",
+      "Do let ember go full-field when the moment earns it (closing section, hero highlight) — one section/moment at a time.",
+      "Do keep real product screenshots as the primary persuasive device.",
+      "Do keep a persistent primary CTA reachable (nav-cta) on any long scrolling page.",
+      "Do give status pills their real per-item state rather than one hardcoded label."
+    ],
+    "donts": [
+      "Don't reintroduce a serif display font, italics, or a decorative mono label anywhere — that was the previous, now-replaced system.",
+      "Don't add border-radius to anything.",
+      "Don't reintroduce soft blurred shadows or rotation.",
+      "Don't use gradient text, hero-metric stat blocks, glassmorphism, or cream/beige surfaces anywhere.",
+      "Don't introduce parchment-and-dragons fantasy-tavern illustration, mascots, or quest-log copy.",
+      "Don't let the mobile nav collapse with no replacement.",
+      "Don't let a listed group exceed 4 items without splitting into labeled sub-groups.",
+      "Don't set body-length copy in uppercase."
+    ]
+  }
+}

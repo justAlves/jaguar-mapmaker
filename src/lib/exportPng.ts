@@ -1,5 +1,4 @@
 import { Container, Graphics, Sprite } from "pixi.js";
-import { writeFile } from "@tauri-apps/plugin-fs";
 import type { MapProject, ProjectLocation } from "../types";
 import { parseWallKey, WALL_THICKNESS_RATIO } from "../types";
 import { assetFileUrl, thumbnailPath } from "./projectIO";
@@ -7,6 +6,7 @@ import { loadTexture } from "./textureCache";
 import { getSharedRenderer } from "./sharedRenderer";
 import { wallGeometry } from "./wallGeometry";
 import { drawLightGlow } from "./lightRender";
+import { storage } from "./storage";
 
 function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
@@ -180,5 +180,5 @@ export async function renderProjectThumbnailBytes(
 
 export async function saveProjectThumbnail(project: MapProject, location: ProjectLocation): Promise<void> {
   const bytes = await renderProjectThumbnailBytes(project, location);
-  await writeFile(thumbnailPath(location.folderPath), bytes);
+  await storage.writeBinaryFile(thumbnailPath(location.folderPath), bytes);
 }

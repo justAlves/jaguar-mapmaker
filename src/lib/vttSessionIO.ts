@@ -1,8 +1,6 @@
-import { open } from "@tauri-apps/plugin-dialog";
-import { mkdir, writeTextFile, readTextFile, copyFile, exists } from "@tauri-apps/plugin-fs";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { nanoid } from "nanoid";
 import type { CharacterToken, PropInstance, SessionLocation, TokenAsset, VttMapSlot, VttSession } from "../types";
+import { storage } from "./storage";
 
 const SESSION_FILE_NAME = "session.json";
 export const DEFAULT_FOG_ALPHA = 0.5;
@@ -24,45 +22,30 @@ export function createMapSlot(mapFilePath: string, name: string): VttMapSlot {
   };
 }
 
-function join(...parts: string[]): string {
-  return parts.join("/").replace(/\/+/g, "/");
-}
-
 export async function pickFolderForNewSession(): Promise<string | null> {
-  const selected = await open({ directory: true, multiple: false, title: "Escolha a pasta da sessão" });
-  return typeof selected === "string" ? selected : null;
+  return storage.pickFolder("Escolha a pasta da sessão");
 }
 
 export async function pickMapFileForSession(): Promise<string | null> {
-  const selected = await open({
-    multiple: false,
-    title: "Escolha o mapa da sessão",
-    filters: [{ name: "Jaguar Project", extensions: ["json"] }],
-  });
-  return typeof selected === "string" ? selected : null;
+  return storage.pickFile("Escolha o mapa da sessão", [{ name: "Jaguar Project", extensions: ["json"] }]);
 }
 
 export async function createSessionOnDisk(session: VttSession, parentFolder: string): Promise<SessionLocation> {
-  const folderPath = join(parentFolder, session.name);
-  const filePath = join(folderPath, SESSION_FILE_NAME);
+  const folderPath = storage.join(parentFolder, session.name);
+  const filePath = storage.join(folderPath, SESSION_FILE_NAME);
 
-  await mkdir(join(folderPath, "tokens"), { recursive: true });
-  await writeTextFile(filePath, JSON.stringify(session, null, 2));
+  await storage.mkdir(storage.join(folderPath, "tokens"));
+  await storage.writeTextFile(filePath, JSON.stringify(session, null, 2));
 
   return { folderPath, filePath };
 }
 
 export async function saveSession(session: VttSession, location: SessionLocation): Promise<void> {
-  await writeTextFile(location.filePath, JSON.stringify(session, null, 2));
+  await storage.writeTextFile(location.filePath, JSON.stringify(session, null, 2));
 }
 
 export async function pickSessionFileToOpen(): Promise<string | null> {
-  const selected = await open({
-    multiple: false,
-    title: "Abrir sessão",
-    filters: [{ name: "Jaguar Session", extensions: ["json"] }],
-  });
-  return typeof selected === "string" ? selected : null;
+  return storage.pickFile("Abrir sessão", [{ name: "Jaguar Session", extensions: ["json"] }]);
 }
 
 function normalizeCharacters(characters: unknown): CharacterToken[] {
@@ -76,7 +59,7 @@ function normalizeCharacters(characters: unknown): CharacterToken[] {
 }
 
 export async function loadSession(filePath: string): Promise<{ session: VttSession; location: SessionLocation }> {
-  const text = await readTextFile(filePath);
+  const text = await storage.readTextFile(filePath);
   const raw = JSON.parse(text) as VttSession & {
     // pre-multi-map session shape, kept only for migration below
     mapFilePath?: string;
@@ -125,32 +108,27 @@ export async function loadSession(filePath: string): Promise<{ session: VttSessi
 }
 
 export async function importTokenAssets(location: SessionLocation): Promise<TokenAsset[]> {
-  const selected = await open({
-    multiple: true,
-    title: "Importar tokens",
-    filters: [{ name: "Imagens", extensions: ["png"] }],
-  });
-  if (!selected) return [];
-  const paths = Array.isArray(selected) ? selected : [selected];
+  const paths = await storage.pickFiles("Importar tokens", [{ name: "Imagens", extensions: ["png"] }]);
+  if (!paths) return [];
 
-  const destDir = join(location.folderPath, "tokens");
-  await mkdir(destDir, { recursive: true });
+  const destDir = storage.join(location.folderPath, "tokens");
+  await storage.mkdir(destDir);
 
   const created: TokenAsset[] = [];
   for (const sourcePath of paths) {
     const fileName = sourcePath.split(/[\\/]/).pop() ?? "token.png";
     let destName = fileName;
-    let destPath = join(destDir, destName);
+    let destPath = storage.join(destDir, destName);
     let counter = 1;
-    while (await exists(destPath)) {
+    while (await storage.exists(destPath)) {
       const dotIdx = fileName.lastIndexOf(".");
       const base = dotIdx >= 0 ? fileName.slice(0, dotIdx) : fileName;
       const ext = dotIdx >= 0 ? fileName.slice(dotIdx) : "";
       destName = `${base}_${counter}${ext}`;
-      destPath = join(destDir, destName);
+      destPath = storage.join(destDir, destName);
       counter++;
     }
-    await copyFile(sourcePath, destPath);
+    await storage.copyFile(sourcePath, destPath);
     const dotIdx = destName.lastIndexOf(".");
     const name = dotIdx >= 0 ? destName.slice(0, dotIdx) : destName;
     created.push({ id: nanoid(), fileName: destName, name });
@@ -159,5 +137,5 @@ export async function importTokenAssets(location: SessionLocation): Promise<Toke
 }
 
 export function tokenAssetFileUrl(location: SessionLocation, asset: TokenAsset): string {
-  return convertFileSrc(join(location.folderPath, "tokens", asset.fileName));
+  return storage.fileUrl(storage.join(location.folderPath, "tokens", asset.fileName));
 }
