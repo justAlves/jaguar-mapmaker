@@ -5,6 +5,7 @@ import { ToolRail } from "./ToolRail";
 import { AssetPanel } from "./AssetPanel";
 import { MapCanvas } from "./MapCanvas";
 import { PropInspector } from "./PropInspector";
+import { LightInspector } from "./LightInspector";
 import { IconButton } from "./IconButton";
 import { useEditorStore } from "../store/editorStore";
 import { useSettingsStore } from "../store/settingsStore";
@@ -74,6 +75,20 @@ export function Editor({ onOpenSettings }: { onOpenSettings: () => void }) {
               scaleY: prop.scaleY,
             });
           }
+        } else if (state.selectedLightId) {
+          const light = state.project?.lights.find((l) => l.id === state.selectedLightId);
+          if (light) {
+            state.addLight({
+              kind: light.kind,
+              x: light.x + 16,
+              y: light.y + 16,
+              color: light.color,
+              radius: light.radius,
+              intensity: light.intensity,
+              rotation: light.rotation,
+              coneAngle: light.coneAngle,
+            });
+          }
         }
         return;
       }
@@ -83,24 +98,39 @@ export function Editor({ onOpenSettings }: { onOpenSettings: () => void }) {
         if (state.selectedPropId) {
           e.preventDefault();
           state.removeProp(state.selectedPropId);
+        } else if (state.selectedLightId) {
+          e.preventDefault();
+          state.removeLight(state.selectedLightId);
         }
         return;
       }
 
       if (key === "escape") {
         state.setSelectedPropId(null);
+        state.setSelectedLightId(null);
         return;
       }
 
       if (key === "arrowup" || key === "arrowdown" || key === "arrowleft" || key === "arrowright") {
-        if (!state.selectedPropId) return;
-        const prop = state.project?.props.find((p) => p.id === state.selectedPropId);
-        if (!prop) return;
-        e.preventDefault();
-        const step = e.shiftKey ? NUDGE_STEP_FAST : NUDGE_STEP;
-        const dx = key === "arrowleft" ? -step : key === "arrowright" ? step : 0;
-        const dy = key === "arrowup" ? -step : key === "arrowdown" ? step : 0;
-        state.updateProp(prop.id, { x: prop.x + dx, y: prop.y + dy });
+        if (state.selectedPropId) {
+          const prop = state.project?.props.find((p) => p.id === state.selectedPropId);
+          if (!prop) return;
+          e.preventDefault();
+          const step = e.shiftKey ? NUDGE_STEP_FAST : NUDGE_STEP;
+          const dx = key === "arrowleft" ? -step : key === "arrowright" ? step : 0;
+          const dy = key === "arrowup" ? -step : key === "arrowdown" ? step : 0;
+          state.updateProp(prop.id, { x: prop.x + dx, y: prop.y + dy });
+          return;
+        }
+        if (state.selectedLightId) {
+          const light = state.project?.lights.find((l) => l.id === state.selectedLightId);
+          if (!light) return;
+          e.preventDefault();
+          const step = e.shiftKey ? NUDGE_STEP_FAST : NUDGE_STEP;
+          const dx = key === "arrowleft" ? -step : key === "arrowright" ? step : 0;
+          const dy = key === "arrowup" ? -step : key === "arrowdown" ? step : 0;
+          state.updateLight(light.id, { x: light.x + dx, y: light.y + dy });
+        }
         return;
       }
 
@@ -111,11 +141,26 @@ export function Editor({ onOpenSettings }: { onOpenSettings: () => void }) {
         case "w":
           state.setTool("paintWall");
           return;
+        case "b":
+          state.setTool("floorRect");
+          return;
+        case "l":
+          state.setTool("floorLine");
+          return;
+        case "j":
+          state.setTool("wallLine");
+          return;
+        case "u":
+          state.setTool("floorBucket");
+          return;
         case "x":
           state.setTool("erase");
           return;
         case "p":
           state.setTool("props");
+          return;
+        case "k":
+          state.setTool("light");
           return;
         case "h":
           state.setTool("pan");
@@ -150,6 +195,7 @@ export function Editor({ onOpenSettings }: { onOpenSettings: () => void }) {
             <AssetPanel />
             <MapCanvas />
             <PropInspector />
+            <LightInspector />
           </div>
         </div>
       </div>

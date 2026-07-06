@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Application, Container, Graphics, Sprite, type FederatedPointerEvent } from "pixi.js";
+import { Application, Circle, Container, Graphics, Sprite, type FederatedPointerEvent } from "pixi.js";
 import { useEditorStore } from "../store/editorStore";
 import { assetFileUrl } from "../lib/projectIO";
 import { loadTexture } from "../lib/textureCache";
 import { registerSharedRenderer } from "../lib/sharedRenderer";
-import { canonicalizeWallEdge, parseWallKey, wallKey, WALL_THICKNESS_RATIO } from "../types";
-import type { AssetRef, MapProject, ProjectLocation, WallEdge } from "../types";
+import { canonicalizeWallEdge, cellKey, parseWallKey, wallKey, WALL_THICKNESS_RATIO } from "../types";
+import type { AssetRef, LightInstance, MapProject, ProjectLocation, WallEdge } from "../types";
 import { nearestEdge, wallGeometry } from "../lib/wallGeometry";
+import { drawLightGlow, degToRad } from "../lib/lightRender";
 import { useT } from "../i18n/useT";
 import { useResolvedTheme } from "../lib/applyTheme";
 
@@ -24,8 +25,37 @@ const HANDLE_VISUAL_PX = 8;
 const ROTATE_HANDLE_DISTANCE_PX = 26;
 const MIN_PROP_SIZE_PX = 4;
 
-function degToRad(deg: number): number {
-  return (deg * Math.PI) / 180;
+/** World-unit radius of the clickable/draggable handle drawn at a light's center. */
+const LIGHT_HANDLE_RADIUS = 20;
+/** Screen-pixel distance from a cone light's center to its rotate handle. */
+const LIGHT_ROTATE_HANDLE_DISTANCE_PX = 40;
+const LIGHT_COLOR_PALETTE = ["#ffaa55", "#66ccff", "#ff5566", "#aa66ff", "#66ff99", "#ffee66"];
+const DEFAULT_LIGHT_RADIUS = 220;
+const DEFAULT_LIGHT_INTENSITY = 0.6;
+const DEFAULT_LIGHT_CONE_ANGLE = 60;
+
+/**
+ * Draws a light's glow (radial disc or cone wedge) plus a small always-visible center handle.
+ * The cone's direction is NOT baked into the geometry here: it's drawn pointing along angle 0
+ * and the caller applies it as `gfx.rotation` instead, so a rotate-drag can update `gfx.rotation`
+ * directly on every pointermove without rebuilding the gradient/geometry each frame.
+ */
+function drawLightShape(gfx: Graphics, light: LightInstance) {
+  drawLightGlow(gfx, light);
+  gfx.circle(0, 0, LIGHT_HANDLE_RADIUS * 0.3).fill({ color: 0xffffff, alpha: 0.9 });
+  gfx.hitArea = new Circle(0, 0, LIGHT_HANDLE_RADIUS);
+}
+
+/** Screen-pixel click tolerance around the light rotate handle: bigger than prop handles since it's an isolated small dot. */
+const LIGHT_ROTATE_HANDLE_HIT_PX = 22;
+
+/** Hit-tests a cone light's on-canvas rotate handle, positioned at a fixed screen-pixel distance from its center. */
+function hitTestLightRotateHandle(gfx: Graphics, worldPoint: { x: number; y: number }, worldScale: number): boolean {
+  const dist = LIGHT_ROTATE_HANDLE_DISTANCE_PX / worldScale;
+  const hx = gfx.x + Math.cos(gfx.rotation) * dist;
+  const hy = gfx.y + Math.sin(gfx.rotation) * dist;
+  const tol = LIGHT_ROTATE_HANDLE_HIT_PX / worldScale;
+  return Math.hypot(worldPoint.x - hx, worldPoint.y - hy) <= tol;
 }
 
 function radToDeg(rad: number): number {
@@ -57,11 +87,31 @@ const PROP_HANDLES: PropHandle[] = [
 ];
 
 interface DragState {
-  mode: "none" | "pan" | "paintFloor" | "paintWall" | "erase" | "propMove" | "propTransform";
+  mode:
+    | "none"
+    | "pan"
+    | "paintFloor"
+    | "paintWall"
+    | "erase"
+    | "propMove"
+    | "propTransform"
+    | "lightMove"
+    | "lightRotate"
+    | "floorRect"
+    | "floorLine"
+    | "wallLine";
   lastPaintedKey: string | null;
   panStart: { sx: number; sy: number; wx: number; wy: number } | null;
   propId: string | null;
   propStart: { sx: number; sy: number; px: number; py: number } | null;
+  lightId: string | null;
+  lightStart: { sx: number; sy: number; lx: number; ly: number } | null;
+  /** Start/current cell for the floorRect/floorLine drag, in grid coordinates (clamped to bounds). */
+  shapeStart: { cx: number; cy: number } | null;
+  shapeEnd: { cx: number; cy: number } | null;
+  /** Fixed anchor edge (and orientation) for a wallLine drag, plus the current end cell along that axis. */
+  wallLineStart: { x: number; y: number; edge: WallEdge } | null;
+  wallLineEnd: { x: number; y: number } | null;
   transform: {
     handle: PropHandle;
     /** World-local point that stays fixed during a corner/edge resize (the opposite corner/edge). */
@@ -91,6 +141,7 @@ export function MapCanvas() {
   const floorLayerRef = useRef<Container | null>(null);
   const wallLayerRef = useRef<Container | null>(null);
   const propsLayerRef = useRef<Container | null>(null);
+  const lightsLayerRef = useRef<Container | null>(null);
   const gridLayerRef = useRef<Graphics | null>(null);
   const selectionLayerRef = useRef<Graphics | null>(null);
   const hoverLayerRef = useRef<Graphics | null>(null);
@@ -100,6 +151,7 @@ export function MapCanvas() {
   const floorSpritesRef = useRef<Map<string, Sprite>>(new Map());
   const wallSpritesRef = useRef<Map<string, Sprite>>(new Map());
   const propSpritesRef = useRef<Map<string, Sprite>>(new Map());
+  const lightGraphicsRef = useRef<Map<string, Graphics>>(new Map());
 
   // Snapshots of the cell maps as of the last sync, so unchanged cells never get re-touched.
   const prevFloorCellsRef = useRef<Record<string, string>>({});
@@ -111,7 +163,13 @@ export function MapCanvas() {
     panStart: null,
     propId: null,
     propStart: null,
+    lightId: null,
+    lightStart: null,
     transform: null,
+    shapeStart: null,
+    shapeEnd: null,
+    wallLineStart: null,
+    wallLineEnd: null,
   });
 
   const project = useEditorStore((s) => s.project);
@@ -121,13 +179,19 @@ export function MapCanvas() {
   const showGrid = useEditorStore((s) => s.showGrid);
   const selectedPropId = useEditorStore((s) => s.selectedPropId);
   const setSelectedPropId = useEditorStore((s) => s.setSelectedPropId);
+  const selectedLightId = useEditorStore((s) => s.selectedLightId);
+  const setSelectedLightId = useEditorStore((s) => s.setSelectedLightId);
   const wallEdgeMode = useEditorStore((s) => s.wallEdgeMode);
   const cycleWallEdgeMode = useEditorStore((s) => s.cycleWallEdgeMode);
   const draggingAssetId = useEditorStore((s) => s.draggingAssetId);
   const paintCell = useEditorStore((s) => s.paintCell);
   const paintWallEdge = useEditorStore((s) => s.paintWallEdge);
+  const paintCellsBatch = useEditorStore((s) => s.paintCellsBatch);
+  const paintWallEdgesBatch = useEditorStore((s) => s.paintWallEdgesBatch);
   const addProp = useEditorStore((s) => s.addProp);
   const updateProp = useEditorStore((s) => s.updateProp);
+  const addLight = useEditorStore((s) => s.addLight);
+  const updateLight = useEditorStore((s) => s.updateLight);
   const resolvedTheme = useResolvedTheme();
 
   const latestRef = useRef({
@@ -136,15 +200,21 @@ export function MapCanvas() {
     tool,
     selectedAssetId,
     selectedPropId,
+    selectedLightId,
     wallEdgeMode,
     cycleWallEdgeMode,
     draggingAssetId,
     resolvedTheme,
     paintCell,
     paintWallEdge,
+    paintCellsBatch,
+    paintWallEdgesBatch,
     addProp,
     updateProp,
+    addLight,
+    updateLight,
     setSelectedPropId,
+    setSelectedLightId,
   });
   latestRef.current = {
     project,
@@ -152,15 +222,21 @@ export function MapCanvas() {
     tool,
     selectedAssetId,
     selectedPropId,
+    selectedLightId,
     wallEdgeMode,
     cycleWallEdgeMode,
     draggingAssetId,
     resolvedTheme,
     paintCell,
     paintWallEdge,
+    paintCellsBatch,
+    paintWallEdgesBatch,
     addProp,
     updateProp,
+    addLight,
+    updateLight,
     setSelectedPropId,
+    setSelectedLightId,
   };
 
   function computeWallTarget(local: { x: number; y: number }, project: MapProject): WallTarget | null {
@@ -226,6 +302,107 @@ export function MapCanvas() {
     return `floor:${target.cx},${target.cy}`;
   }
 
+  /** All cells covered by the axis-aligned rectangle spanning start..end, clamped to the grid. */
+  function computeRectCells(
+    start: { cx: number; cy: number },
+    end: { cx: number; cy: number },
+    project: MapProject,
+  ): { x: number; y: number }[] {
+    const x0 = Math.max(0, Math.min(start.cx, end.cx));
+    const x1 = Math.min(project.gridWidth - 1, Math.max(start.cx, end.cx));
+    const y0 = Math.max(0, Math.min(start.cy, end.cy));
+    const y1 = Math.min(project.gridHeight - 1, Math.max(start.cy, end.cy));
+    const cells: { x: number; y: number }[] = [];
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) cells.push({ x, y });
+    }
+    return cells;
+  }
+
+  /** Cells along a straight (Bresenham) line from start to end, clamped to the grid. */
+  function computeLineCells(
+    start: { cx: number; cy: number },
+    end: { cx: number; cy: number },
+    project: MapProject,
+  ): { x: number; y: number }[] {
+    let x0 = start.cx;
+    let y0 = start.cy;
+    const x1 = end.cx;
+    const y1 = end.cy;
+    const dx = Math.abs(x1 - x0);
+    const sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0);
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    const cells: { x: number; y: number }[] = [];
+    for (;;) {
+      if (x0 >= 0 && y0 >= 0 && x0 < project.gridWidth && y0 < project.gridHeight) cells.push({ x: x0, y: y0 });
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx) {
+        err += dx;
+        y0 += sy;
+      }
+    }
+    return cells;
+  }
+
+  /**
+   * Wall edges of the same type (N/S/E/W, fixed at drag start) along a straight run between two
+   * cells. N/S edges run horizontally (vary x, fixed y); E/W edges run vertically (vary y, fixed x).
+   */
+  function computeWallLineEdges(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    edge: WallEdge,
+  ): { x: number; y: number; edge: WallEdge }[] {
+    const edges: { x: number; y: number; edge: WallEdge }[] = [];
+    if (edge === "N" || edge === "S") {
+      const y = y0;
+      const xa = Math.min(x0, x1);
+      const xb = Math.max(x0, x1);
+      for (let x = xa; x <= xb; x++) edges.push({ x, y, edge });
+    } else {
+      const x = x0;
+      const ya = Math.min(y0, y1);
+      const yb = Math.max(y0, y1);
+      for (let y = ya; y <= yb; y++) edges.push({ x, y, edge });
+    }
+    return edges;
+  }
+
+  /** Flood-fills the floor layer from (startX, startY), 4-directionally, replacing every contiguous
+   *  cell that shares the clicked cell's asset (including empty cells) with `replacement`. */
+  function floodFillFloor(
+    project: MapProject,
+    startX: number,
+    startY: number,
+    replacement: string,
+  ): { x: number; y: number }[] {
+    const target = project.floorCells[cellKey(startX, startY)] ?? null;
+    if (target === replacement) return [];
+    const visited = new Set<string>();
+    const stack: { x: number; y: number }[] = [{ x: startX, y: startY }];
+    const result: { x: number; y: number }[] = [];
+    while (stack.length > 0) {
+      const { x, y } = stack.pop()!;
+      if (x < 0 || y < 0 || x >= project.gridWidth || y >= project.gridHeight) continue;
+      const key = cellKey(x, y);
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if ((project.floorCells[key] ?? null) !== target) continue;
+      result.push({ x, y });
+      stack.push({ x: x + 1, y }, { x: x - 1, y }, { x, y: y + 1 }, { x, y: y - 1 });
+    }
+    return result;
+  }
+
   // --- init Pixi application once ---
   useEffect(() => {
     const el = containerRef.current;
@@ -261,14 +438,18 @@ export function MapCanvas() {
         const propsLayer = new Container();
         propsLayer.zIndex = 2;
         propsLayer.sortableChildren = true;
+        const lightsLayer = new Container();
+        lightsLayer.zIndex = 3;
+        lightsLayer.sortableChildren = true;
+        lightsLayer.blendMode = "add";
         const gridLayer = new Graphics();
-        gridLayer.zIndex = 3;
+        gridLayer.zIndex = 4;
         const selectionLayer = new Graphics();
-        selectionLayer.zIndex = 4;
+        selectionLayer.zIndex = 5;
         const hoverLayer = new Graphics();
-        hoverLayer.zIndex = 5;
+        hoverLayer.zIndex = 6;
         const ghostLayer = new Container();
-        ghostLayer.zIndex = 6;
+        ghostLayer.zIndex = 7;
         const floorGhost = new Sprite();
         floorGhost.alpha = 0;
         floorGhost.eventMode = "none";
@@ -278,10 +459,11 @@ export function MapCanvas() {
         propGhost.eventMode = "none";
         ghostLayer.addChild(floorGhost, propGhost);
 
-        world.addChild(floorLayer, wallLayer, propsLayer, gridLayer, selectionLayer, hoverLayer, ghostLayer);
+        world.addChild(floorLayer, wallLayer, propsLayer, lightsLayer, gridLayer, selectionLayer, hoverLayer, ghostLayer);
         floorLayerRef.current = floorLayer;
         wallLayerRef.current = wallLayer;
         propsLayerRef.current = propsLayer;
+        lightsLayerRef.current = lightsLayer;
         gridLayerRef.current = gridLayer;
         selectionLayerRef.current = selectionLayer;
         hoverLayerRef.current = hoverLayer;
@@ -346,6 +528,50 @@ export function MapCanvas() {
           if (dedupKey === null) return;
           drag.mode = "erase";
           drag.lastPaintedKey = dedupKey;
+          return;
+        }
+
+        if (tool === "floorRect" || tool === "floorLine") {
+          const local = toWorld(e.global);
+          const cx = Math.floor(local.x / project.tileSize);
+          const cy = Math.floor(local.y / project.tileSize);
+          if (cx < 0 || cy < 0 || cx >= project.gridWidth || cy >= project.gridHeight) return;
+          const { selectedAssetId } = latestRef.current;
+          if (!selectedAssetId) return;
+          drag.mode = tool;
+          drag.shapeStart = { cx, cy };
+          drag.shapeEnd = { cx, cy };
+          drawShapePreview(drag.shapeStart, drag.shapeEnd, tool);
+          return;
+        }
+
+        if (tool === "wallLine") {
+          const local = toWorld(e.global);
+          const target = computeWallTarget(local, project);
+          if (!target) return;
+          const { selectedAssetId } = latestRef.current;
+          if (!selectedAssetId) return;
+          drag.mode = "wallLine";
+          drag.wallLineStart = { x: target.cx, y: target.cy, edge: target.edge };
+          drag.wallLineEnd = { x: target.cx, y: target.cy };
+          drawWallLinePreview(drag.wallLineStart, target.cx, target.cy);
+          return;
+        }
+
+        if (tool === "floorBucket") {
+          const local = toWorld(e.global);
+          const cx = Math.floor(local.x / project.tileSize);
+          const cy = Math.floor(local.y / project.tileSize);
+          if (cx < 0 || cy < 0 || cx >= project.gridWidth || cy >= project.gridHeight) return;
+          const { selectedAssetId, paintCellsBatch } = latestRef.current;
+          if (!selectedAssetId) return;
+          const cells = floodFillFloor(project, cx, cy, selectedAssetId);
+          if (cells.length > 0) {
+            paintCellsBatch(
+              "floor",
+              cells.map((c) => ({ key: cellKey(c.x, c.y), assetId: selectedAssetId })),
+            );
+          }
           return;
         }
 
@@ -415,6 +641,59 @@ export function MapCanvas() {
             if (asset && asset.category === "prop") {
               addProp({ assetId: asset.id, x: local.x, y: local.y, rotation: 0, scaleX: 1, scaleY: 1 });
             }
+          }
+          return;
+        }
+
+        if (tool === "light") {
+          const local = toWorld(e.global);
+
+          // if a cone light is already selected, check its rotate handle before anything else
+          const { selectedLightId: currentSelectedLightId } = latestRef.current;
+          if (currentSelectedLightId) {
+            const selectedLight = project.lights.find((l) => l.id === currentSelectedLightId);
+            const selectedGfx = lightGraphicsRef.current.get(currentSelectedLightId);
+            if (
+              selectedLight?.kind === "cone" &&
+              selectedGfx &&
+              hitTestLightRotateHandle(selectedGfx, local, world.scale.x)
+            ) {
+              drag.mode = "lightRotate";
+              drag.lightId = currentSelectedLightId;
+              drag.lightStart = { sx: e.global.x, sy: e.global.y, lx: selectedGfx.x, ly: selectedGfx.y };
+              return;
+            }
+          }
+
+          const target = e.target;
+          let hitLightId: string | null = null;
+          for (const [id, gfx] of lightGraphicsRef.current) {
+            if (target === gfx) {
+              hitLightId = id;
+              break;
+            }
+          }
+          const { selectedLightId, setSelectedLightId } = latestRef.current;
+          setSelectedLightId(hitLightId);
+          if (hitLightId) {
+            const light = project.lights.find((l) => l.id === hitLightId);
+            if (light) {
+              drag.mode = "lightMove";
+              drag.lightId = hitLightId;
+              drag.lightStart = { sx: e.global.x, sy: e.global.y, lx: light.x, ly: light.y };
+            }
+          } else if (!selectedLightId) {
+            const color = LIGHT_COLOR_PALETTE[project.lights.length % LIGHT_COLOR_PALETTE.length];
+            latestRef.current.addLight({
+              kind: "radial",
+              x: local.x,
+              y: local.y,
+              color,
+              radius: DEFAULT_LIGHT_RADIUS,
+              intensity: DEFAULT_LIGHT_INTENSITY,
+              rotation: 0,
+              coneAngle: DEFAULT_LIGHT_CONE_ANGLE,
+            });
           }
         }
       });
@@ -495,6 +774,22 @@ export function MapCanvas() {
           return;
         }
 
+        if ((drag.mode === "floorRect" || drag.mode === "floorLine") && drag.shapeStart) {
+          const clampedX = Math.max(0, Math.min(project.gridWidth - 1, cx));
+          const clampedY = Math.max(0, Math.min(project.gridHeight - 1, cy));
+          drag.shapeEnd = { cx: clampedX, cy: clampedY };
+          drawShapePreview(drag.shapeStart, drag.shapeEnd, drag.mode);
+          return;
+        }
+
+        if (drag.mode === "wallLine" && drag.wallLineStart) {
+          const clampedX = Math.max(0, Math.min(project.gridWidth - 1, cx));
+          const clampedY = Math.max(0, Math.min(project.gridHeight - 1, cy));
+          drag.wallLineEnd = { x: clampedX, y: clampedY };
+          drawWallLinePreview(drag.wallLineStart, clampedX, clampedY);
+          return;
+        }
+
         if (drag.mode === "propMove" && drag.propStart && drag.propId) {
           const world = worldRef.current!;
           const dx = (e.global.x - drag.propStart.sx) / world.scale.x;
@@ -503,6 +798,31 @@ export function MapCanvas() {
           if (sprite) {
             sprite.x = drag.propStart.px + dx;
             sprite.y = drag.propStart.py + dy;
+            drawSelection();
+          }
+        }
+
+        if (drag.mode === "lightMove" && drag.lightStart && drag.lightId) {
+          const world = worldRef.current!;
+          const dx = (e.global.x - drag.lightStart.sx) / world.scale.x;
+          const dy = (e.global.y - drag.lightStart.sy) / world.scale.y;
+          const gfx = lightGraphicsRef.current.get(drag.lightId);
+          if (gfx) {
+            gfx.x = drag.lightStart.lx + dx;
+            gfx.y = drag.lightStart.ly + dy;
+            drawSelection();
+          }
+        }
+
+        if (drag.mode === "lightRotate" && drag.lightId && drag.lightStart) {
+          const gfx = lightGraphicsRef.current.get(drag.lightId);
+          if (gfx) {
+            let newRotation = Math.atan2(local.y - drag.lightStart.ly, local.x - drag.lightStart.lx);
+            if (e.shiftKey) {
+              const step = Math.PI / 12; // 15deg
+              newRotation = Math.round(newRotation / step) * step;
+            }
+            gfx.rotation = newRotation;
             drawSelection();
           }
         }
@@ -556,6 +876,18 @@ export function MapCanvas() {
             latestRef.current.updateProp(drag.propId, { x: sprite.x, y: sprite.y });
           }
         }
+        if (drag.mode === "lightMove" && drag.lightId) {
+          const gfx = lightGraphicsRef.current.get(drag.lightId);
+          if (gfx) {
+            latestRef.current.updateLight(drag.lightId, { x: gfx.x, y: gfx.y });
+          }
+        }
+        if (drag.mode === "lightRotate" && drag.lightId) {
+          const gfx = lightGraphicsRef.current.get(drag.lightId);
+          if (gfx) {
+            latestRef.current.updateLight(drag.lightId, { rotation: radToDeg(gfx.rotation) });
+          }
+        }
         if (drag.mode === "propTransform" && drag.propId) {
           const sprite = propSpritesRef.current.get(drag.propId);
           if (sprite) {
@@ -568,12 +900,47 @@ export function MapCanvas() {
             });
           }
         }
+        if ((drag.mode === "floorRect" || drag.mode === "floorLine") && drag.shapeStart && drag.shapeEnd) {
+          const { project, selectedAssetId, paintCellsBatch } = latestRef.current;
+          if (project && selectedAssetId) {
+            const cells =
+              drag.mode === "floorRect"
+                ? computeRectCells(drag.shapeStart, drag.shapeEnd, project)
+                : computeLineCells(drag.shapeStart, drag.shapeEnd, project);
+            paintCellsBatch(
+              "floor",
+              cells.map((c) => ({ key: cellKey(c.x, c.y), assetId: selectedAssetId })),
+            );
+          }
+        }
+        if (drag.mode === "wallLine" && drag.wallLineStart && drag.wallLineEnd) {
+          const { project, selectedAssetId, paintWallEdgesBatch } = latestRef.current;
+          if (project && selectedAssetId) {
+            const edges = computeWallLineEdges(
+              drag.wallLineStart.x,
+              drag.wallLineStart.y,
+              drag.wallLineEnd.x,
+              drag.wallLineEnd.y,
+              drag.wallLineStart.edge,
+            );
+            paintWallEdgesBatch(edges.map((e) => ({ ...e, assetId: selectedAssetId })));
+          }
+        }
+        if (drag.mode === "floorRect" || drag.mode === "floorLine" || drag.mode === "wallLine") {
+          hoverLayerRef.current?.clear();
+        }
         drag.mode = "none";
         drag.lastPaintedKey = null;
         drag.panStart = null;
         drag.propId = null;
         drag.propStart = null;
+        drag.lightId = null;
+        drag.lightStart = null;
         drag.transform = null;
+        drag.shapeStart = null;
+        drag.shapeEnd = null;
+        drag.wallLineStart = null;
+        drag.wallLineEnd = null;
       }
 
       stage.on("pointerup", endDrag);
@@ -657,7 +1024,29 @@ export function MapCanvas() {
     const sel = selectionLayerRef.current;
     sel?.clear();
     if (!sel) return;
-    const { selectedPropId, tool } = latestRef.current;
+    const { selectedPropId, selectedLightId, tool } = latestRef.current;
+
+    if (tool === "light" && selectedLightId) {
+      const gfx = lightGraphicsRef.current.get(selectedLightId);
+      const project = latestRef.current.project;
+      const light = project?.lights.find((l) => l.id === selectedLightId);
+      const world = worldRef.current;
+      if (gfx && light && world) {
+        const worldScale = world.scale.x;
+        sel.setStrokeStyle({ width: 1.5 / worldScale, color: 0x4dabf7, alpha: 0.9 });
+        sel.circle(gfx.x, gfx.y, light.radius).stroke();
+        sel.circle(gfx.x, gfx.y, LIGHT_HANDLE_RADIUS).stroke();
+        if (light.kind === "cone") {
+          const dist = LIGHT_ROTATE_HANDLE_DISTANCE_PX / worldScale;
+          const hx = gfx.x + Math.cos(gfx.rotation) * dist;
+          const hy = gfx.y + Math.sin(gfx.rotation) * dist;
+          sel.moveTo(gfx.x, gfx.y).lineTo(hx, hy).stroke();
+          sel.circle(hx, hy, HANDLE_VISUAL_PX / 2 / worldScale).fill({ color: 0xffffff }).stroke();
+        }
+      }
+      return;
+    }
+
     if (tool !== "props" || !selectedPropId) return;
     const sprite = propSpritesRef.current.get(selectedPropId);
     const world = worldRef.current;
@@ -752,6 +1141,49 @@ export function MapCanvas() {
     hover.rect(-project.tileSize / 2, -thickness / 2, project.tileSize, thickness).fill({ color, alpha: 0.5 });
     hover.position.set(cx, cy);
     hover.rotation = rotation;
+  }
+
+  /** Highlights the cells a floorRect/floorLine drag would paint. */
+  function drawShapePreview(
+    start: { cx: number; cy: number },
+    end: { cx: number; cy: number },
+    mode: "floorRect" | "floorLine",
+  ) {
+    const hover = hoverLayerRef.current;
+    const { project } = latestRef.current;
+    if (!hover) return;
+    hover.position.set(0, 0);
+    hover.rotation = 0;
+    hover.clear();
+    if (!project) return;
+    const cells = mode === "floorRect" ? computeRectCells(start, end, project) : computeLineCells(start, end, project);
+    const ts = project.tileSize;
+    for (const c of cells) {
+      hover.rect(c.x * ts, c.y * ts, ts, ts).fill({ color: 0x4dabf7, alpha: 0.35 });
+    }
+  }
+
+  /** Highlights the wall edges a wallLine drag would paint. */
+  function drawWallLinePreview(start: { x: number; y: number; edge: WallEdge }, endX: number, endY: number) {
+    const hover = hoverLayerRef.current;
+    const { project } = latestRef.current;
+    if (!hover) return;
+    hover.position.set(0, 0);
+    hover.rotation = 0;
+    hover.clear();
+    if (!project) return;
+    const edges = computeWallLineEdges(start.x, start.y, endX, endY, start.edge);
+    const ts = project.tileSize;
+    const thickness = ts * WALL_THICKNESS_RATIO;
+    const horizontal = start.edge === "N" || start.edge === "S";
+    for (const e of edges) {
+      const geo = wallGeometry(e.x, e.y, e.edge, ts);
+      if (horizontal) {
+        hover.rect(geo.cx - ts / 2, geo.cy - thickness / 2, ts, thickness).fill({ color: 0x4dabf7, alpha: 0.5 });
+      } else {
+        hover.rect(geo.cx - thickness / 2, geo.cy - ts / 2, thickness, ts).fill({ color: 0x4dabf7, alpha: 0.5 });
+      }
+    }
   }
 
   function assetById(project: MapProject, id: string | undefined | null): AssetRef | undefined {
@@ -920,12 +1352,40 @@ export function MapCanvas() {
     }
   }
 
+  function syncLightsLayer(project: MapProject) {
+    const layer = lightsLayerRef.current;
+    if (!layer) return;
+    const idsNeeded = new Set(project.lights.map((l) => l.id));
+    for (const [id, gfx] of lightGraphicsRef.current) {
+      if (!idsNeeded.has(id)) {
+        layer.removeChild(gfx);
+        gfx.destroy();
+        lightGraphicsRef.current.delete(id);
+      }
+    }
+    for (const light of project.lights) {
+      let gfx = lightGraphicsRef.current.get(light.id);
+      if (!gfx) {
+        gfx = new Graphics();
+        gfx.eventMode = "static";
+        gfx.cursor = "pointer";
+        layer.addChild(gfx);
+        lightGraphicsRef.current.set(light.id, gfx);
+      }
+      gfx.x = light.x;
+      gfx.y = light.y;
+      gfx.rotation = degToRad(light.rotation);
+      drawLightShape(gfx, light);
+    }
+  }
+
   function syncEverything() {
     const { project, location } = latestRef.current;
     if (!project || !location) return;
     syncFloorLayer(project, location);
     syncWallLayer(project, location);
     syncPropsLayer(project, location);
+    syncLightsLayer(project);
     drawGrid();
     drawSelection();
   }
@@ -933,7 +1393,7 @@ export function MapCanvas() {
   useEffect(() => {
     syncEverything();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.floorCells, project?.wallCells, project?.props, project?.assets, location]);
+  }, [project?.floorCells, project?.wallCells, project?.props, project?.lights, project?.assets, location]);
 
   useEffect(() => {
     drawGrid();
@@ -953,7 +1413,7 @@ export function MapCanvas() {
   useEffect(() => {
     drawSelection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPropId, tool]);
+  }, [selectedPropId, selectedLightId, tool]);
 
   // --- drop target for adding props from the asset panel ---
   function handleDrop(e: React.DragEvent) {

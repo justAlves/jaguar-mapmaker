@@ -56,6 +56,7 @@ export async function pickProjectFileToOpen(): Promise<string | null> {
 export async function loadProject(filePath: string): Promise<{ project: MapProject; location: ProjectLocation }> {
   const text = await readTextFile(filePath);
   const project = JSON.parse(text) as MapProject;
+  project.lights = project.lights ?? []; // older saved projects predate the lighting feature
   const folderPath = filePath.slice(0, Math.max(0, filePath.length - PROJECT_FILE_NAME.length - 1));
   return { project, location: { folderPath, filePath } };
 }

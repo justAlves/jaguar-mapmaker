@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
-import type { AssetRef, MapProject, ProjectLocation, PropInstance, ToolMode, WallEdge } from "../types";
+import type { AssetRef, LightInstance, MapProject, ProjectLocation, PropInstance, ToolMode, WallEdge } from "../types";
 import { canonicalizeWallEdge, cellKey, emptyProject, wallKey } from "../types";
 import { touchRecentProject } from "../lib/recentProjects";
 
@@ -10,6 +10,9 @@ export type Command =
   | { type: "addProp"; prop: PropInstance }
   | { type: "removeProp"; prop: PropInstance }
   | { type: "updateProp"; id: string; prev: Partial<PropInstance>; next: Partial<PropInstance> }
+  | { type: "addLight"; light: LightInstance }
+  | { type: "removeLight"; light: LightInstance }
+  | { type: "updateLight"; id: string; prev: Partial<LightInstance>; next: Partial<LightInstance> }
   | { type: "batch"; commands: Command[] };
 
 interface EditorState {
@@ -19,6 +22,7 @@ interface EditorState {
   tool: ToolMode;
   selectedAssetId: string | null;
   selectedPropId: string | null;
+  selectedLightId: string | null;
   showGrid: boolean;
   /** "auto" detects the nearest edge from cursor position; a specific edge pins painting to that side. */
   wallEdgeMode: "auto" | WallEdge;
@@ -36,6 +40,7 @@ interface EditorState {
   setTool: (tool: ToolMode) => void;
   setSelectedAssetId: (id: string | null) => void;
   setSelectedPropId: (id: string | null) => void;
+  setSelectedLightId: (id: string | null) => void;
   toggleGrid: () => void;
   setWallEdgeMode: (mode: "auto" | WallEdge) => void;
   cycleWallEdgeMode: () => void;
@@ -44,12 +49,21 @@ interface EditorState {
 
   addAssets: (assets: AssetRef[]) => void;
   setAssetFolder: (assetId: string, folder: string | null) => void;
+  toggleAssetFavorite: (assetId: string) => void;
 
   paintCell: (layer: "floor" | "wall", x: number, y: number, assetId: string | null) => void;
   paintWallEdge: (x: number, y: number, edge: WallEdge, assetId: string | null) => void;
+  /** Applies many cell paints (e.g. rectangle/line/bucket fill) as a single undo step. */
+  paintCellsBatch: (layer: "floor" | "wall", entries: { key: string; assetId: string | null }[]) => void;
+  /** Applies many wall-edge paints (e.g. a straight wall line) as a single undo step. */
+  paintWallEdgesBatch: (edges: { x: number; y: number; edge: WallEdge; assetId: string | null }[]) => void;
   addProp: (partial: Omit<PropInstance, "id" | "zIndex">) => void;
   updateProp: (id: string, next: Partial<PropInstance>) => void;
   removeProp: (id: string) => void;
+
+  addLight: (partial: Omit<LightInstance, "id">) => void;
+  updateLight: (id: string, next: Partial<LightInstance>) => void;
+  removeLight: (id: string) => void;
 
   undo: () => void;
   redo: () => void;
@@ -89,6 +103,25 @@ function applyCommand(project: MapProject, command: Command, direction: "do" | "
         props: project.props.map((p) => (p.id === command.id ? { ...p, ...patch } : p)),
       };
     }
+    case "addLight": {
+      if (direction === "do") {
+        return { ...project, lights: [...project.lights, command.light] };
+      }
+      return { ...project, lights: project.lights.filter((l) => l.id !== command.light.id) };
+    }
+    case "removeLight": {
+      if (direction === "do") {
+        return { ...project, lights: project.lights.filter((l) => l.id !== command.light.id) };
+      }
+      return { ...project, lights: [...project.lights, command.light] };
+    }
+    case "updateLight": {
+      const patch = direction === "do" ? command.next : command.prev;
+      return {
+        ...project,
+        lights: project.lights.map((l) => (l.id === command.id ? { ...l, ...patch } : l)),
+      };
+    }
     case "batch": {
       const ordered = direction === "do" ? command.commands : [...command.commands].reverse();
       return ordered.reduce((proj, cmd) => applyCommand(proj, cmd, direction), project);
@@ -103,6 +136,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   tool: "paintFloor",
   selectedAssetId: null,
   selectedPropId: null,
+  selectedLightId: null,
   showGrid: true,
   wallEdgeMode: "auto",
   draggingAssetId: null,
@@ -112,7 +146,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   redoStack: [],
 
   setProjectAndLocation: (project, location) => {
-    set({ project, location, undoStack: [], redoStack: [], selectedPropId: null });
+    set({ project, location, undoStack: [], redoStack: [], selectedPropId: null, selectedLightId: null });
     touchRecentProject({
       name: project.name,
       filePath: location.filePath,
@@ -125,9 +159,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   closeProject: () => set({ project: null, location: null, undoStack: [], redoStack: [] }),
 
-  setTool: (tool) => set({ tool, selectedPropId: tool === "props" ? get().selectedPropId : null }),
+  setTool: (tool) =>
+    set({
+      tool,
+      selectedPropId: tool === "props" ? get().selectedPropId : null,
+      selectedLightId: tool === "light" ? get().selectedLightId : null,
+    }),
   setSelectedAssetId: (id) => set({ selectedAssetId: id }),
   setSelectedPropId: (id) => set({ selectedPropId: id }),
+  setSelectedLightId: (id) => set({ selectedLightId: id }),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   setWallEdgeMode: (mode) => set({ wallEdgeMode: mode }),
   cycleWallEdgeMode: () =>
@@ -151,6 +191,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { project: { ...s.project, assets } };
     }),
 
+  toggleAssetFavorite: (assetId) =>
+    set((s) => {
+      if (!s.project) return s;
+      const assets = s.project.assets.map((a) => (a.id === assetId ? { ...a, favorite: !a.favorite } : a));
+      return { project: { ...s.project, assets } };
+    }),
+
   paintCell: (layer, x, y, assetId) => {
     const { project } = get();
     if (!project) return;
@@ -171,6 +218,45 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const prevAssetId = project.wallCells[key] ?? null;
     if (prevAssetId === assetId) return;
     const command: Command = { type: "paintCell", layer: "wall", key, prevAssetId, nextAssetId: assetId };
+    const nextProject = applyCommand(project, command, "do");
+    set({ project: nextProject, undoStack: [...get().undoStack, command], redoStack: [] });
+  },
+
+  paintCellsBatch: (layer, entries) => {
+    const { project } = get();
+    if (!project) return;
+    const cells = layer === "floor" ? project.floorCells : project.wallCells;
+    const commands: Command[] = [];
+    const seen = new Set<string>();
+    for (const { key, assetId } of entries) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const prevAssetId = cells[key] ?? null;
+      if (prevAssetId === assetId) continue;
+      commands.push({ type: "paintCell", layer, key, prevAssetId, nextAssetId: assetId });
+    }
+    if (commands.length === 0) return;
+    const command: Command = commands.length === 1 ? commands[0] : { type: "batch", commands };
+    const nextProject = applyCommand(project, command, "do");
+    set({ project: nextProject, undoStack: [...get().undoStack, command], redoStack: [] });
+  },
+
+  paintWallEdgesBatch: (edges) => {
+    const { project } = get();
+    if (!project) return;
+    const commands: Command[] = [];
+    const seen = new Set<string>();
+    for (const e of edges) {
+      const canon = canonicalizeWallEdge(e.x, e.y, e.edge, project.gridWidth, project.gridHeight);
+      const key = wallKey(canon.x, canon.y, canon.edge);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const prevAssetId = project.wallCells[key] ?? null;
+      if (prevAssetId === e.assetId) continue;
+      commands.push({ type: "paintCell", layer: "wall", key, prevAssetId, nextAssetId: e.assetId });
+    }
+    if (commands.length === 0) return;
+    const command: Command = commands.length === 1 ? commands[0] : { type: "batch", commands };
     const nextProject = applyCommand(project, command, "do");
     set({ project: nextProject, undoStack: [...get().undoStack, command], redoStack: [] });
   },
@@ -211,6 +297,44 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       undoStack: [...get().undoStack, command],
       redoStack: [],
       selectedPropId: get().selectedPropId === id ? null : get().selectedPropId,
+    });
+  },
+
+  addLight: (partial) => {
+    const { project } = get();
+    if (!project) return;
+    const light: LightInstance = { ...partial, id: nanoid() };
+    const command: Command = { type: "addLight", light };
+    const nextProject = applyCommand(project, command, "do");
+    set({ project: nextProject, undoStack: [...get().undoStack, command], redoStack: [], selectedLightId: light.id });
+  },
+
+  updateLight: (id, next) => {
+    const { project } = get();
+    if (!project) return;
+    const current = project.lights.find((l) => l.id === id);
+    if (!current) return;
+    const prev: Partial<LightInstance> = {};
+    for (const k of Object.keys(next) as (keyof LightInstance)[]) {
+      (prev as Record<string, unknown>)[k] = current[k];
+    }
+    const command: Command = { type: "updateLight", id, prev, next };
+    const nextProject = applyCommand(project, command, "do");
+    set({ project: nextProject, undoStack: [...get().undoStack, command], redoStack: [] });
+  },
+
+  removeLight: (id) => {
+    const { project } = get();
+    if (!project) return;
+    const light = project.lights.find((l) => l.id === id);
+    if (!light) return;
+    const command: Command = { type: "removeLight", light };
+    const nextProject = applyCommand(project, command, "do");
+    set({
+      project: nextProject,
+      undoStack: [...get().undoStack, command],
+      redoStack: [],
+      selectedLightId: get().selectedLightId === id ? null : get().selectedLightId,
     });
   },
 
